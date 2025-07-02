@@ -6,64 +6,53 @@ import { connectDB } from "./lib/db.js";
 import userRouter from "./routes/userRoutes.js";
 import messageRouter from "./routes/messageRoutes.js";
 import { Server } from "socket.io";
+import { Socket } from "dgram";
 
 // create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
 
-// Correct CORS for Socket.io
-export const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+// Initialize socket.io server
+export const io = new Server(server , {
+    cors: {origin: "*"}
+})
 
-// Correct CORS for Express
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
-
-// Store online users
+// store online users
 export const userSocketMap = {}; // {userId : socketId}
 
 // Socket.io connection handler
-io.on("connection", (Socket) => {
-  const userId = Socket.handshake.query.userId;
-  console.log("User Connected", userId);
+io.on("connection" , (Socket)=>{
+    const userId = Socket.handshake.query.userId;
+    console.log("User Connected" , userId);
 
-  if (userId) userSocketMap[userId] = Socket.id;
+    if(userId) userSocketMap[userId] = Socket.id;
+    
+    // Emit online users to all connected clinents
+    io.emit("getOnlineUsers" , Object.keys(userSocketMap));
 
-  io.emit("getOnlineUsers", Object.keys(userSocketMap));
+    Socket.on("disconnect" , ()=>{
+        console.log("User Disconnected" , userId);
+        delete userSocketMap[userId];
+        io.emit("getOnlineUsers" , Object.keys(userSocketMap))
+    })
+})
 
-  Socket.on("disconnect", () => {
-    console.log("User Disconnected", userId);
-    delete userSocketMap[userId];
-    io.emit("getOnlineUsers", Object.keys(userSocketMap));
-  });
-});
+// Middleware setup
+app.use(express.json({limit: "4mb"}));
+app.use(cors());
 
-// Middleware
-app.use(express.json({ limit: "4mb" }));
+// Routes setup
+app.use("/api/status" , (req,res)=>res.send("server is live"));
+app.use("/api/auth" , userRouter);
+app.use("/api/messages" , messageRouter);
 
-// Routes
-app.use("/api/status", (req, res) => res.send("server is live"));
-app.use("/api/auth", userRouter);
-app.use("/api/messages", messageRouter);
-
-// Connect to MongoDB
+//connect to mongodb
 await connectDB();
 
-// Local dev listen
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 5000;
-  server.listen(PORT, () =>
-    console.log(`server is running on PORT : ${PORT}`)
-  );
+if(process.env.NODE_ENV !== "production"){
+    const PORT = process.env.PORT || 5000;
+    server.listen(PORT, ()=> console.log(`server is running on PORT : ${PORT}`));
 }
 
-// Export for Vercel
+// Export server for vercel
 export default server;
